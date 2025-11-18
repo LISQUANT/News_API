@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-News Sentiment Analyzer V2 - Fixed Version
-Enhanced version with -1 to 1 sentiment scoring, CSV output, and configurable prompts
-"""
-
 import csv
 import json
 import os
@@ -17,14 +11,11 @@ import google.generativeai as genai
 import requests
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
 
 @dataclass
 class NewsArticle:
-    """Data class for news articles"""
-
     title: str
     description: str
     source: str
@@ -50,7 +41,6 @@ class SentimentAnalysis:
 
 
 class StockTickerExtractor:
-    """Extract stock tickers from news articles"""
 
     # Common stock tickers for detection
     COMMON_TICKERS = {
@@ -108,7 +98,6 @@ class StockTickerExtractor:
     def extract_ticker(
         cls, title: str, content: str, gemini_response: Dict = None
     ) -> str:
-        """Extract stock ticker from article content"""
 
         # First check if Gemini identified a ticker
         if gemini_response and "ticker" in gemini_response:
@@ -116,37 +105,30 @@ class StockTickerExtractor:
             if ticker and ticker != "GENERAL":
                 return ticker
 
-        # Combine title and content for searching
         text = f"{title} {content}".upper()
 
-        # Look for explicit ticker mentions (e.g., "AAPL", "(NASDAQ: AAPL)")
         ticker_pattern = (
             r"\b([A-Z]{1,5})\b(?:\s*[\(\[]?(?:NASDAQ|NYSE|AMEX|OTC)?:?\s*\1[\)\]]?)?"
         )
         matches = re.findall(ticker_pattern, text)
 
-        # Check against known tickers
         for match in matches:
             if match in cls.COMMON_TICKERS:
                 return match
 
-        # Check for company names
         for ticker, company in cls.COMMON_TICKERS.items():
             if company.upper() in text:
                 return ticker
 
-        # Default to GENERAL for non-stock-specific news
         return "GENERAL"
 
 
 class PromptManager:
-    """Manage and load prompts from configuration"""
 
     def __init__(self):
         self.prompts = self.get_default_prompts()
 
     def get_default_prompts(self) -> Dict[str, str]:
-        """Get default prompt templates with proper formatting"""
         return {
             "sentiment_analysis": """You are a professional financial analyst specializing in market sentiment analysis. Analyze the following news article and provide a detailed sentiment assessment specifically focused on market and stock impact.
 
@@ -200,12 +182,10 @@ IMPORTANT:
     def get_prompt(self, prompt_type: str, **kwargs) -> str:
         """Get formatted prompt with variables replaced"""
         template = self.prompts.get(prompt_type, self.prompts["sentiment_analysis"])
-        # Simple string format that preserves JSON structure
         return template.format(**kwargs)
 
 
 class NewsAPIClient:
-    """Client for fetching news from NewsAPI"""
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -366,8 +346,6 @@ class GeminiSentimentAnalyzer:
 
 
 class CSVExporter:
-    """Export sentiment analyses to CSV format"""
-
     @staticmethod
     def export_to_csv(analyses: List[SentimentAnalysis], filename: str = None) -> str:
         """Export analyses to CSV file"""
@@ -390,7 +368,6 @@ class CSVExporter:
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-            # Write header
             writer.writeheader()
 
             # Write data rows
@@ -415,13 +392,11 @@ class CSVExporter:
     def export_detailed_json(
         analyses: List[SentimentAnalysis], filename: str = None
     ) -> str:
-        """Export detailed analyses to JSON file"""
 
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"sentiment_details_{timestamp}.json"
 
-        # Convert to JSON-serializable format
         data = {
             "timestamp": datetime.now().isoformat(),
             "total_articles": len(analyses),
@@ -453,7 +428,6 @@ class CSVExporter:
 
 
 class StockNewsSentimentAnalyzer:
-    """Main class for stock news sentiment analysis"""
 
     def __init__(self, news_api_key: str, gemini_api_key: str):
         self.news_client = NewsAPIClient(news_api_key)
@@ -466,7 +440,6 @@ class StockNewsSentimentAnalyzer:
     def analyze_stocks(
         self, tickers: List[str], max_articles_per_stock: int = 5
     ) -> List[SentimentAnalysis]:
-        """Analyze multiple stocks"""
 
         all_analyses = []
 
@@ -494,7 +467,6 @@ class StockNewsSentimentAnalyzer:
         return all_analyses
 
     def analyze_market(self, max_articles: int = 20) -> List[SentimentAnalysis]:
-        """Analyze general market news"""
 
         print("\n📰 Analyzing market news...")
         articles = self.news_client.fetch_market_news(page_size=max_articles)
@@ -512,7 +484,6 @@ class StockNewsSentimentAnalyzer:
         return analyses
 
     def generate_report(self, analyses: List[SentimentAnalysis]):
-        """Generate and display comprehensive report"""
 
         if not analyses:
             print("No analyses to report")
@@ -590,7 +561,6 @@ class StockNewsSentimentAnalyzer:
 
 
 def main():
-    """Main execution function"""
 
     print("\n🚀 STOCK NEWS SENTIMENT ANALYZER V2")
     print("=" * 50)
@@ -605,7 +575,6 @@ def main():
     if not gemini_api_key:
         gemini_api_key = input("Enter your Google Gemini API key: ").strip()
 
-    # Initialize analyzer
     analyzer = StockNewsSentimentAnalyzer(news_api_key, gemini_api_key)
 
     while True:
