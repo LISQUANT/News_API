@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-import google.generativeai as genai
+from google import genai
 import requests
 from dotenv import load_dotenv
 
@@ -286,8 +286,8 @@ class GeminiSentimentAnalyzer:
     """Sentiment analyzer using Google Gemini with -1 to 1 scoring"""
 
     def __init__(self, api_key: str, prompt_manager: PromptManager):
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel("gemini-pro")
+        # Initialize the Gemini client - matches Google documentation
+        self.client = genai.Client(api_key=api_key)
         self.prompt_manager = prompt_manager
 
     def analyze_article(self, article: NewsArticle) -> Optional[SentimentAnalysis]:
@@ -304,7 +304,11 @@ class GeminiSentimentAnalyzer:
         )
 
         try:
-            response = self.model.generate_content(prompt)
+            # Use exact syntax from Google documentation
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-exp",
+                contents=prompt,
+            )
             response_text = response.text
 
             # Clean up response - remove any markdown formatting
