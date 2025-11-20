@@ -351,15 +351,14 @@ class GeminiSentimentAnalyzer:
 
 class CSVExporter:
     @staticmethod
-    def export_to_csv(analyses: List[SentimentAnalysis], filename: str = None) -> str:
-        """Export analyses to CSV file"""
+    def export_to_csv(analyses: List[SentimentAnalysis], filename: str = "sentiment_analysis.csv") -> str:
+        """Export analyses to CSV file, appending if file exists"""
 
-        if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"sentiment_analysis_{timestamp}.csv"
+        # Check if file exists to determine if we need to write headers
+        file_exists = os.path.exists(filename)
 
-        # Prepare CSV data
-        with open(filename, "w", newline="", encoding="utf-8") as csvfile:
+        # Prepare CSV data - append mode
+        with open(filename, "a", newline="", encoding="utf-8") as csvfile:
             fieldnames = [
                 "ticker",
                 "news_date",
@@ -372,7 +371,9 @@ class CSVExporter:
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-            writer.writeheader()
+            # Only write header if file is new
+            if not file_exists:
+                writer.writeheader()
 
             # Write data rows
             for analysis in analyses:
@@ -389,7 +390,8 @@ class CSVExporter:
                     }
                 )
 
-        print(f"📊 CSV exported to: {filename}")
+        action = "appended to" if file_exists else "created"
+        print(f"{len(analyses)} analyses {action}: {filename}")
         return filename
 
     @staticmethod
@@ -427,7 +429,7 @@ class CSVExporter:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-        print(f"📄 Detailed JSON exported to: {filename}")
+        print(f"Detailed JSON exported to: {filename}")
         return filename
 
 
@@ -448,7 +450,7 @@ class StockNewsSentimentAnalyzer:
         all_analyses = []
 
         for ticker in tickers:
-            print(f"\n📈 Analyzing {ticker}...")
+            print(f"\nAnalyzing {ticker}...")
             articles = self.news_client.fetch_stock_news(ticker)[
                 :max_articles_per_stock
             ]
@@ -472,7 +474,7 @@ class StockNewsSentimentAnalyzer:
 
     def analyze_market(self, max_articles: int = 20) -> List[SentimentAnalysis]:
 
-        print("\n📰 Analyzing market news...")
+        print("\nAnalyzing market news...")
         articles = self.news_client.fetch_market_news(page_size=max_articles)
 
         analyses = []
@@ -494,7 +496,7 @@ class StockNewsSentimentAnalyzer:
             return
 
         print("\n" + "=" * 70)
-        print("📊 SENTIMENT ANALYSIS REPORT")
+        print("SENTIMENT ANALYSIS REPORT")
         print("=" * 70)
 
         # Group by ticker
@@ -506,7 +508,7 @@ class StockNewsSentimentAnalyzer:
 
         # Overall metrics
         avg_sentiment = sum(a.sentiment_score for a in analyses) / len(analyses)
-        print(f"\n📈 OVERALL METRICS:")
+        print(f"\nOVERALL METRICS:")
         print(f"  Articles Analyzed: {len(analyses)}")
         print(f"  Average Sentiment: {avg_sentiment:+.3f}")
         print(f"  Stocks Covered: {len(by_ticker)}")
@@ -518,15 +520,15 @@ class StockNewsSentimentAnalyzer:
         negative = sum(1 for a in analyses if -0.5 <= a.sentiment_score < 0)
         very_negative = sum(1 for a in analyses if a.sentiment_score < -0.5)
 
-        print(f"\n📊 SENTIMENT DISTRIBUTION:")
-        print(f"  Very Positive (>0.5):  {'█' * very_positive} {very_positive}")
-        print(f"  Positive (0 to 0.5):   {'█' * positive} {positive}")
-        print(f"  Neutral (-0.1 to 0.1): {'█' * neutral} {neutral}")
-        print(f"  Negative (-0.5 to 0):  {'█' * negative} {negative}")
-        print(f"  Very Negative (<-0.5): {'█' * very_negative} {very_negative}")
+        print(f"\nSENTIMENT DISTRIBUTION:")
+        print(f"  Very Positive (>0.5):  {'*' * very_positive} {very_positive}")
+        print(f"  Positive (0 to 0.5):   {'*' * positive} {positive}")
+        print(f"  Neutral (-0.1 to 0.1): {'*' * neutral} {neutral}")
+        print(f"  Negative (-0.5 to 0):  {'*' * negative} {negative}")
+        print(f"  Very Negative (<-0.5): {'*' * very_negative} {very_negative}")
 
         # Top movers
-        print(f"\n🔝 TOP MOVERS:")
+        print(f"\nTOP MOVERS:")
         sorted_tickers = sorted(
             by_ticker.items(),
             key=lambda x: sum(a.sentiment_score for a in x[1]) / len(x[1]),
@@ -546,19 +548,19 @@ class StockNewsSentimentAnalyzer:
                 print(f"    {ticker}: {avg:+.3f} ({len(ticker_analyses)} articles)")
 
         # Recent headlines
-        print(f"\n📰 RECENT HEADLINES:")
+        print(f"\nRECENT HEADLINES:")
         for analysis in sorted(analyses, key=lambda x: x.sentiment_score, reverse=True)[
             :5
         ]:
-            emoji = (
-                "🟢"
+            indicator = (
+                "[+]"
                 if analysis.sentiment_score > 0.2
-                else "🔴"
+                else "[-]"
                 if analysis.sentiment_score < -0.2
-                else "🟡"
+                else "[=]"
             )
             print(
-                f"  {emoji} [{analysis.ticker}] {analysis.sentiment_score:+.3f}: {analysis.headline[:70]}"
+                f"  {indicator} [{analysis.ticker}] {analysis.sentiment_score:+.3f}: {analysis.headline[:70]}"
             )
 
         print("\n" + "=" * 70)
@@ -566,7 +568,7 @@ class StockNewsSentimentAnalyzer:
 
 def main():
 
-    print("\n🚀 STOCK NEWS SENTIMENT ANALYZER V2")
+    print("\nSTOCK NEWS SENTIMENT ANALYZER V2")
     print("=" * 50)
 
     # Get API keys
@@ -582,7 +584,7 @@ def main():
     analyzer = StockNewsSentimentAnalyzer(news_api_key, gemini_api_key)
 
     while True:
-        print("\n📋 OPTIONS:")
+        print("\nOPTIONS:")
         print("1. Analyze Specific Stocks")
         print("2. Analyze Market News")
         print("3. Analyze from Watchlist File")
@@ -606,21 +608,8 @@ def main():
 
             if analyses:
                 analyzer.generate_report(analyses)
-
-                # Export options
-                print("\n💾 EXPORT OPTIONS:")
-                print("1. Export to CSV")
-                print("2. Export detailed JSON")
-                print("3. Both")
-                print("4. Skip")
-
-                export_choice = input("Select (1-4): ").strip()
-
-                if export_choice in ["1", "3"]:
-                    analyzer.csv_exporter.export_to_csv(analyses)
-
-                if export_choice in ["2", "3"]:
-                    analyzer.csv_exporter.export_detailed_json(analyses)
+                # Automatically export to CSV
+                analyzer.csv_exporter.export_to_csv(analyses)
 
         elif choice == "2":
             # Analyze market news
@@ -632,21 +621,8 @@ def main():
 
             if analyses:
                 analyzer.generate_report(analyses)
-
-                # Export options
-                print("\n💾 EXPORT OPTIONS:")
-                print("1. Export to CSV")
-                print("2. Export detailed JSON")
-                print("3. Both")
-                print("4. Skip")
-
-                export_choice = input("Select (1-4): ").strip()
-
-                if export_choice in ["1", "3"]:
-                    analyzer.csv_exporter.export_to_csv(analyses)
-
-                if export_choice in ["2", "3"]:
-                    analyzer.csv_exporter.export_detailed_json(analyses)
+                # Automatically export to CSV
+                analyzer.csv_exporter.export_to_csv(analyses)
 
         elif choice == "3":
             # Load watchlist from file
@@ -668,17 +644,17 @@ def main():
 
                 if analyses:
                     analyzer.generate_report(analyses)
+                    # Automatically export to CSV
                     analyzer.csv_exporter.export_to_csv(analyses)
-                    analyzer.csv_exporter.export_detailed_json(analyses)
             else:
-                print(f"❌ File {watchlist_file} not found")
+                print(f"ERROR: File {watchlist_file} not found")
 
         elif choice == "4":
-            print("\n👋 Goodbye!")
+            print("\nGoodbye!")
             break
 
         else:
-            print("❌ Invalid option")
+            print("ERROR: Invalid option")
 
 
 if __name__ == "__main__":
