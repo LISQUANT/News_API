@@ -27,7 +27,6 @@ class NewsArticle:
 
 @dataclass
 class SentimentAnalysis:
-    """Data class for sentiment analysis results"""
 
     ticker: str
     news_date: str
@@ -40,9 +39,19 @@ class SentimentAnalysis:
     raw_response: Dict[str, Any]
 
 
+@dataclass
+class StockAggregateAnalysis:
+
+    ticker: str
+    num_articles: int
+    weighted_avg_score: float  # (sentiment_score * confidence) aggregated
+    ai_summary: str
+    date_range: str
+    individual_analyses: List[SentimentAnalysis]
+
+
 class StockTickerExtractor:
 
-    # Common stock tickers for detection
     COMMON_TICKERS = {
         "AAPL": "Apple",
         "GOOGL": "Google",
@@ -125,63 +134,20 @@ class StockTickerExtractor:
 
 class PromptManager:
 
-    def __init__(self):
-        self.prompts = self.get_default_prompts()
+    def __init__(self, prompts_file: str = "prompts.json"):
+        self.prompts_file = prompts_file
+        self.prompts = self.load_prompts()
 
-    def get_default_prompts(self) -> Dict[str, str]:
-        return {
-            "sentiment_analysis": """You are a professional financial analyst specializing in market sentiment analysis. Analyze the following news article and provide a detailed sentiment assessment specifically focused on market and stock impact.
-
-ARTICLE DETAILS:
-Title: {title}
-Source: {source}
-Published: {published_at}
-Description: {description}
-Content: {content}
-
-ANALYSIS REQUIREMENTS:
-
-1. SENTIMENT SCORE: Provide a precise sentiment score from -1.0 to 1.0 where:
-   - -1.0 = Extremely negative (bankruptcy, fraud, major lawsuits, severe losses)
-   - -0.75 = Very negative (significant losses, downgrades, major problems)
-   - -0.5 = Negative (missed earnings, declining sales, minor setbacks)
-   - -0.25 = Slightly negative (minor concerns, small headwinds)
-   - 0.0 = Neutral (no clear positive or negative impact)
-   - 0.25 = Slightly positive (minor improvements, small wins)
-   - 0.5 = Positive (beat earnings, growth, upgrades)
-   - 0.75 = Very positive (major contracts, breakthrough innovations)
-   - 1.0 = Extremely positive (game-changing developments, massive growth)
-
-2. STOCK TICKER: Identify the primary stock ticker if this news is about a specific company. Use "GENERAL" if it's about the overall market or multiple companies.
-
-3. CONFIDENCE LEVEL: Rate your confidence in this analysis from 0.0 to 1.0
-
-4. KEY FACTORS: List the specific factors that influenced your sentiment score
-
-5. MARKET IMPACT: Assess the likely market impact (immediate, short-term, long-term)
-
-Please respond ONLY with a valid JSON object in the following format (no markdown, no code blocks, just JSON):
-{{
-    "sentiment_score": <float between -1.0 and 1.0>,
-    "ticker": "<stock ticker or GENERAL>",
-    "confidence": <float between 0.0 and 1.0>,
-    "summary": "<2-3 sentence summary of the article>",
-    "key_factors": ["<factor1>", "<factor2>", "<factor3>"],
-    "market_impact": "<immediate/short-term/long-term impact assessment>",
-    "reasoning": "<brief explanation of why this sentiment score was assigned>"
-}}
-
-IMPORTANT:
-- Be objective and data-driven in your assessment
-- Consider both direct and indirect impacts
-- Account for market context and sector implications
-- Ensure the sentiment score accurately reflects the magnitude of impact
-- Return ONLY the JSON object, no additional text or formatting"""
-        }
+    def load_prompts(self) -> Dict[str, str]:
+        """Load prompts from JSON file"""
+        if os.path.exists(self.prompts_file):
+            with open(self.prompts_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else:
+            raise FileNotFoundError(f"Error: {self.prompts_file} not found. Please ensure the prompts.json file exists.")
 
     def get_prompt(self, prompt_type: str, **kwargs) -> str:
-        """Get formatted prompt with variables replaced"""
-        template = self.prompts.get(prompt_type, self.prompts["sentiment_analysis"])
+        template = self.prompts.get(prompt_type, self.prompts.get("sentiment_analysis", ""))
         return template.format(**kwargs)
 
 
@@ -192,7 +158,6 @@ class NewsAPIClient:
         self.base_url = "https://newsapi.org/v2"
 
     def fetch_stock_news(self, ticker: str, from_date: str = None) -> List[NewsArticle]:
-        """Fetch news for specific stock ticker"""
 
         # Map ticker to company name if known
         company_names = {
@@ -248,7 +213,7 @@ class NewsAPIClient:
     def fetch_market_news(
         self, category: str = "business", page_size: int = 20
     ) -> List[NewsArticle]:
-        """Fetch general market news"""
+        #Fetch general market news
 
         endpoint = f"{self.base_url}/top-headlines"
         params = {
@@ -283,7 +248,7 @@ class NewsAPIClient:
 
 
 class GeminiSentimentAnalyzer:
-    """Sentiment analyzer using Google Gemini with -1 to 1 scoring"""
+    #Sentiment analyzer using Google Gemini with -1 to 1 scoring
 
     def __init__(self, api_key: str, prompt_manager: PromptManager):
         # Initialize the Gemini client - matches Google documentation
@@ -291,9 +256,6 @@ class GeminiSentimentAnalyzer:
         self.prompt_manager = prompt_manager
 
     def analyze_article(self, article: NewsArticle) -> Optional[SentimentAnalysis]:
-        """Analyze sentiment of a single article"""
-
-        # Get the prompt template
         prompt = self.prompt_manager.get_prompt(
             "sentiment_analysis",
             title=article.title,
@@ -348,16 +310,89 @@ class GeminiSentimentAnalyzer:
             print(f"Error analyzing article '{article.title[:50]}...': {e}")
             return None
 
+    def generate_batch_summary(
+        self, ticker: str, analyses: List[SentimentAnalysis]
+    ) -> str:
+        """Generate an AI summary for a batch of news articles about a stock"""
+
+        if not analyses:
+            return "No articles analyzed"
+
+        articles_summary = "\n\n".join(
+            [
+                f"Article {i+1}:\n"
+                f"  Headline: {a.headline}\n"
+                f"  Sentiment Score: {a.sentiment_score:+.2f}\n"
+                f"  Confidence: {a.confidence:.0%}\n"
+                f"  Summary: {a.summary}"
+                for i, a in enumerate(analyses)
+            ]
+        )
+
+        prompt = self.prompt_manager.get_prompt(
+            "batch_summary",
+            ticker=ticker,
+            num_articles=len(analyses),
+            articles_summary=articles_summary,
+        )
+
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.0-flash-exp",
+                contents=prompt,
+            )
+            return response.text.strip()
+
+        except Exception as e:
+            print(f"Error generating batch summary for {ticker}: {e}")
+            return f"Error generating summary: {str(e)}"
+
 
 class CSVExporter:
     @staticmethod
-    def export_to_csv(analyses: List[SentimentAnalysis], filename: str = "sentiment_analysis.csv") -> str:
-        """Export analyses to CSV file, appending if file exists"""
+    def export_aggregates_to_csv(
+        aggregates: List[StockAggregateAnalysis],
+        filename: str = "sentiment_analysis.csv",
+    ) -> str:
 
-        # Check if file exists to determine if we need to write headers
         file_exists = os.path.exists(filename)
 
-        # Prepare CSV data - append mode
+        with open(filename, "a", newline="", encoding="utf-8") as csvfile:
+            fieldnames = [
+                "ticker",
+                "num_articles",
+                "weighted_avg_score",
+                "date_range",
+                "ai_summary",
+            ]
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+            if not file_exists:
+                writer.writeheader()
+
+            for agg in aggregates:
+                writer.writerow(
+                    {
+                        "ticker": agg.ticker,
+                        "num_articles": agg.num_articles,
+                        "weighted_avg_score": round(agg.weighted_avg_score, 4),
+                        "date_range": agg.date_range,
+                        "ai_summary": agg.ai_summary,
+                    }
+                )
+
+        action = "appended to" if file_exists else "created"
+        print(f"{len(aggregates)} stock aggregates {action}: {filename}")
+        return filename
+
+    @staticmethod
+    def export_to_csv(
+        analyses: List[SentimentAnalysis], filename: str = "sentiment_analysis.csv"
+    ) -> str:
+        """Export analyses to CSV file, appending if file exists"""
+
+        file_exists = os.path.exists(filename)
+
         with open(filename, "a", newline="", encoding="utf-8") as csvfile:
             fieldnames = [
                 "ticker",
@@ -371,11 +406,9 @@ class CSVExporter:
             ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
-            # Only write header if file is new
             if not file_exists:
                 writer.writeheader()
 
-            # Write data rows
             for analysis in analyses:
                 writer.writerow(
                     {
@@ -443,11 +476,51 @@ class StockNewsSentimentAnalyzer:
         )
         self.csv_exporter = CSVExporter()
 
+    def aggregate_stock_analysis(
+        self, ticker: str, analyses: List[SentimentAnalysis]
+    ) -> StockAggregateAnalysis:
+
+        if not analyses:
+            return StockAggregateAnalysis(
+                ticker=ticker,
+                num_articles=0,
+                weighted_avg_score=0.0,
+                ai_summary="No articles analyzed",
+                date_range="N/A",
+                individual_analyses=[],
+            )
+
+        total_weighted_score = sum(
+            a.sentiment_score * a.confidence for a in analyses
+        )
+        total_confidence = sum(a.confidence for a in analyses)
+
+        weighted_avg = (
+            total_weighted_score / total_confidence if total_confidence > 0 else 0.0
+        )
+
+        dates = [a.news_date for a in analyses if a.news_date]
+        date_range = (
+            f"{min(dates)} to {max(dates)}" if dates and len(set(dates)) > 1 else dates[0] if dates else "N/A"
+        )
+
+        print(f"  Generating AI summary for {ticker}...")
+        ai_summary = self.sentiment_analyzer.generate_batch_summary(ticker, analyses)
+
+        return StockAggregateAnalysis(
+            ticker=ticker,
+            num_articles=len(analyses),
+            weighted_avg_score=weighted_avg,
+            ai_summary=ai_summary,
+            date_range=date_range,
+            individual_analyses=analyses,
+        )
+
     def analyze_stocks(
         self, tickers: List[str], max_articles_per_stock: int = 5
-    ) -> List[SentimentAnalysis]:
+    ) -> List[StockAggregateAnalysis]:
 
-        all_analyses = []
+        stock_aggregates = []
 
         for ticker in tickers:
             print(f"\nAnalyzing {ticker}...")
@@ -459,18 +532,26 @@ class StockNewsSentimentAnalyzer:
                 print(f"  No articles found for {ticker}")
                 continue
 
+            ticker_analyses = []
             for article in articles:
                 print(f"  Analyzing: {article.title[:60]}...")
                 analysis = self.sentiment_analyzer.analyze_article(article)
                 if analysis:
-                    all_analyses.append(analysis)
+                    ticker_analyses.append(analysis)
                     print(
                         f"    Sentiment: {analysis.sentiment_score:+.3f} (Confidence: {analysis.confidence:.1%})"
                     )
 
                 time.sleep(1)  # Rate limiting
 
-        return all_analyses
+            if ticker_analyses:
+                aggregate = self.aggregate_stock_analysis(ticker, ticker_analyses)
+                stock_aggregates.append(aggregate)
+                print(
+                    f"  {ticker} Weighted Average: {aggregate.weighted_avg_score:+.3f} ({aggregate.num_articles} articles)"
+                )
+
+        return stock_aggregates
 
     def analyze_market(self, max_articles: int = 20) -> List[SentimentAnalysis]:
 
@@ -489,36 +570,39 @@ class StockNewsSentimentAnalyzer:
 
         return analyses
 
-    def generate_report(self, analyses: List[SentimentAnalysis]):
+    def generate_report(self, aggregates: List[StockAggregateAnalysis]):
 
-        if not analyses:
+        if not aggregates:
             print("No analyses to report")
             return
 
-        print("\n" + "=" * 70)
-        print("SENTIMENT ANALYSIS REPORT")
-        print("=" * 70)
-
-        # Group by ticker
-        by_ticker = {}
-        for analysis in analyses:
-            if analysis.ticker not in by_ticker:
-                by_ticker[analysis.ticker] = []
-            by_ticker[analysis.ticker].append(analysis)
+        print("\n" + "=" * 80)
+        print("STOCK SENTIMENT ANALYSIS REPORT (AGGREGATED)")
+        print("=" * 80)
 
         # Overall metrics
-        avg_sentiment = sum(a.sentiment_score for a in analyses) / len(analyses)
+        total_articles = sum(agg.num_articles for agg in aggregates)
+        avg_weighted_score = (
+            sum(agg.weighted_avg_score for agg in aggregates) / len(aggregates)
+            if aggregates
+            else 0
+        )
+
         print(f"\nOVERALL METRICS:")
-        print(f"  Articles Analyzed: {len(analyses)}")
-        print(f"  Average Sentiment: {avg_sentiment:+.3f}")
-        print(f"  Stocks Covered: {len(by_ticker)}")
+        print(f"  Stocks Analyzed: {len(aggregates)}")
+        print(f"  Total Articles: {total_articles}")
+        print(f"  Average Weighted Score: {avg_weighted_score:+.4f}")
 
         # Sentiment distribution
-        very_positive = sum(1 for a in analyses if a.sentiment_score > 0.5)
-        positive = sum(1 for a in analyses if 0 < a.sentiment_score <= 0.5)
-        neutral = sum(1 for a in analyses if -0.1 <= a.sentiment_score <= 0.1)
-        negative = sum(1 for a in analyses if -0.5 <= a.sentiment_score < 0)
-        very_negative = sum(1 for a in analyses if a.sentiment_score < -0.5)
+        very_positive = sum(1 for a in aggregates if a.weighted_avg_score > 0.5)
+        positive = sum(1 for a in aggregates if 0 < a.weighted_avg_score <= 0.5)
+        neutral = sum(
+            1 for a in aggregates if -0.1 <= a.weighted_avg_score <= 0.1
+        )
+        negative = sum(
+            1 for a in aggregates if -0.5 <= a.weighted_avg_score < 0
+        )
+        very_negative = sum(1 for a in aggregates if a.weighted_avg_score < -0.5)
 
         print(f"\nSENTIMENT DISTRIBUTION:")
         print(f"  Very Positive (>0.5):  {'*' * very_positive} {very_positive}")
@@ -527,43 +611,43 @@ class StockNewsSentimentAnalyzer:
         print(f"  Negative (-0.5 to 0):  {'*' * negative} {negative}")
         print(f"  Very Negative (<-0.5): {'*' * very_negative} {very_negative}")
 
-        # Top movers
-        print(f"\nTOP MOVERS:")
-        sorted_tickers = sorted(
-            by_ticker.items(),
-            key=lambda x: sum(a.sentiment_score for a in x[1]) / len(x[1]),
-            reverse=True,
+        # Stock rankings
+        print(f"\nSTOCK RANKINGS BY WEIGHTED SENTIMENT:")
+        sorted_aggregates = sorted(
+            aggregates, key=lambda x: x.weighted_avg_score, reverse=True
         )
 
-        print("  Positive:")
-        for ticker, ticker_analyses in sorted_tickers[:3]:
-            avg = sum(a.sentiment_score for a in ticker_analyses) / len(ticker_analyses)
-            if avg > 0:
-                print(f"    {ticker}: {avg:+.3f} ({len(ticker_analyses)} articles)")
-
-        print("  Negative:")
-        for ticker, ticker_analyses in sorted_tickers[-3:]:
-            avg = sum(a.sentiment_score for a in ticker_analyses) / len(ticker_analyses)
-            if avg < 0:
-                print(f"    {ticker}: {avg:+.3f} ({len(ticker_analyses)} articles)")
-
-        # Recent headlines
-        print(f"\nRECENT HEADLINES:")
-        for analysis in sorted(analyses, key=lambda x: x.sentiment_score, reverse=True)[
-            :5
-        ]:
+        for i, agg in enumerate(sorted_aggregates, 1):
             indicator = (
-                "[+]"
-                if analysis.sentiment_score > 0.2
-                else "[-]"
-                if analysis.sentiment_score < -0.2
+                "[++]"
+                if agg.weighted_avg_score > 0.5
+                else "[+]"
+                if agg.weighted_avg_score > 0.2
                 else "[=]"
+                if agg.weighted_avg_score > -0.2
+                else "[-]"
+                if agg.weighted_avg_score > -0.5
+                else "[--]"
             )
             print(
-                f"  {indicator} [{analysis.ticker}] {analysis.sentiment_score:+.3f}: {analysis.headline[:70]}"
+                f"  {i}. {indicator} {agg.ticker}: {agg.weighted_avg_score:+.4f} "
+                f"({agg.num_articles} articles)"
             )
 
-        print("\n" + "=" * 70)
+        # Detailed summaries
+        print(f"\n{'=' * 80}")
+        print("AI-GENERATED SUMMARIES BY STOCK")
+        print("=" * 80)
+
+        for agg in sorted_aggregates:
+            print(f"\n{agg.ticker} - Weighted Score: {agg.weighted_avg_score:+.4f}")
+            print(f"Date Range: {agg.date_range}")
+            print(f"Articles Analyzed: {agg.num_articles}")
+            print(f"\nSummary:")
+            print(f"  {agg.ai_summary}")
+            print("-" * 80)
+
+        print("\n" + "=" * 80)
 
 
 def main():
@@ -604,12 +688,12 @@ def main():
                 input("Max articles per stock [default: 5]: ").strip() or "5"
             )
 
-            analyses = analyzer.analyze_stocks(tickers, max_articles)
+            aggregates = analyzer.analyze_stocks(tickers, max_articles)
 
-            if analyses:
-                analyzer.generate_report(analyses)
+            if aggregates:
+                analyzer.generate_report(aggregates)
                 # Automatically export to CSV
-                analyzer.csv_exporter.export_to_csv(analyses)
+                analyzer.csv_exporter.export_aggregates_to_csv(aggregates)
 
         elif choice == "2":
             # Analyze market news
@@ -640,12 +724,12 @@ def main():
                     input("Max articles per stock [default: 3]: ").strip() or "3"
                 )
 
-                analyses = analyzer.analyze_stocks(tickers, max_articles)
+                aggregates = analyzer.analyze_stocks(tickers, max_articles)
 
-                if analyses:
-                    analyzer.generate_report(analyses)
+                if aggregates:
+                    analyzer.generate_report(aggregates)
                     # Automatically export to CSV
-                    analyzer.csv_exporter.export_to_csv(analyses)
+                    analyzer.csv_exporter.export_aggregates_to_csv(aggregates)
             else:
                 print(f"ERROR: File {watchlist_file} not found")
 
